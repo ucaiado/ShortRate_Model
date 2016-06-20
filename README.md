@@ -14,8 +14,8 @@ This project requires **Python 2.7** and the following Python libraries installe
 
 
 ### Reference
-A. J. Kalotay, G. O. Williams, F. J. Fabozzi.  *A Model For Value Bonds and Embedded Options*.   Financial Analystis Journal, 1993. [*link*](http://www.kalotay.com/sites/default/files/private/FAJ93.pdf)
-G. W. Buetow Jr., B. Hanke, F. J. Fabozzi.  *Impact of Different Interest Rate Models on Bond Value Measures*. The Journal Of Fixed Income. 2001.
+1. A. J. Kalotay, G. O. Williams, F. J. Fabozzi.  *A Model For Value Bonds and Embedded Options*.   Financial Analystis Journal, 1993. [*link*](http://www.kalotay.com/sites/default/files/private/FAJ93.pdf)
+2. G. W. Buetow Jr., B. Hanke, F. J. Fabozzi.  *Impact of Different Interest Rate Models on Bond Value Measures*. The Journal Of Fixed Income, 2001. [*link*](http://www.iijournals.com/doi/abs/10.3905/jfi.2001.319304?journalCode=jfi)
 
 ### License
 The contents of this repository are covered under the [MIT License](LICENSE).
