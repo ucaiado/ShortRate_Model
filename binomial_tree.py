@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Implement Kalotay-Williams-Fabozzi model using a binomial tree
-
+reference: http://www.kalotay.com/sites/default/files/private/FAJ93.pdf
 
 @author: ucaiado
 
@@ -11,10 +11,39 @@ Created on 06/20/2016
 
 # import libraries
 from collections import defaultdict
+import math
+import pandas as pd
+from scipy import optimize
 
 '''
 Begin help functions
 '''
+
+
+class DIFFERENT_LENGTHS_ERROR(Exception):
+    '''
+    DIFFERENT_LENGTHS_ERROR is raised by the init method of the KWFTree class
+    '''
+    pass
+
+
+class NOT_FITTED_ERROR(Exception):
+    '''
+    DIFFERENT_LENGTHS_ERROR is raised by the get_lattice method from KWFTree
+    '''
+    pass
+
+
+def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time):
+    '''
+    Return the value of the short rate given by the dynamic given in the paper
+    :param f_time: float. time to maturity
+    :param i_above_min: integer.
+    '''
+    theta_dt = 0.
+    sigma_w = f_sigma * (f_time**0.5) * (i_above_min * 1.)
+    return f_init_rate * math.exp(sigma_w)
+
 
 '''
 End help functions
@@ -23,10 +52,9 @@ End help functions
 
 class Node(object):
     '''
-    A representation of a single Node in a binary tree. Store all nodes
-    created
+    A representation of a single Node in a binary tree
     '''
-    def __init__(self, s_name):
+    def __init__(self, s_name, f_prob=0.5):
         '''
         Instatiate a Node object. Save all parameter as attributes
         :param s_name: string. The name of the node. Is expected
@@ -45,10 +73,22 @@ class Node(object):
         # guarda nome e inicia branch
         self.name = str(s_name)
         # inicia parametros do no
-        self.i_r = None
-        self.i_time = None
-        self.i_cupon = None
-        self.i_value = None
+        self.f_r = 0.
+        self.f_time = 0.
+        self.f_cupon = 0.
+        self.f_value = 0.
+        self.f_prob = 0.5
+
+    def set_values(self, f_cupon, f_value, f_r=None, f_time=None):
+        '''
+        Set values of the node
+        '''
+        if f_r:
+            self.f_r = f_r
+        if f_time:
+            self.f_time = f_time
+        self.f_cupon = f_cupon
+        self.f_value = f_value
 
     def get_childrens(self):
         '''
@@ -61,7 +101,7 @@ class Node(object):
 
     def get_source(self):
         '''
-        Return the source of the node
+        Return the possible childrens of the node
         '''
         s_name = self.name
         if len(s_name) == 1 and s_name != '_':
@@ -70,6 +110,23 @@ class Node(object):
             s_name = ''
         else:
             return s_name[:-1]
+
+    def copy(self):
+        '''
+        Return a copy of the node
+        '''
+        # copia todos os atributos
+        node = Node(self.name)
+        node.i_step = self.i_step
+        node.i_level = self.i_level
+        node.node_idx = self.node_idx
+        node.f_cupon = self.f_cupon
+        node.f_value = self.f_value
+        node.f_r = self.f_r
+        node.f_time = self.f_time
+        node.f_cupon = self.f_cupon
+        node.f_prob = self.f_prob
+        return node
 
     def __str__(self):
         '''
@@ -118,58 +175,65 @@ class BinomialTree(object):
     '''
     def __init__(self, i_steps):
         '''
-        Initiate a BinomialTree object. Save all parameter as
-        attributes
+        Initiate a BinomialTree object. Save all parameter as attributes
         :param i_step: integer. Number of steps in the tree
         '''
-        # python sets se comportam como hastable. O tempo
-        # de procura eh O(1), e nao O(n) como uma lista
-        self.set_of_nodes = set([])
         # inicia outras variaveis
         self.i_steps = i_steps
         self.d_step = defaultdict(list)
         self.d_level = defaultdict(list)
-        # insere nodes
+        # python sets se comportam como hastable. O tempo
+        # de procura eh O(1), e nao O(n) como uma lista
+        self.set_of_nodes = set([])
+        self.d_nodes = defaultdict(float)
+
+    def add_node(self, s_name, f_time):
+        '''
+        Include a new node in the tree. To reduce the number of nodes, a
+        restriction called recombination condition is imposed on the algorithm.
+        This make the binomial method more computationally tractable since the
+        number of nodes at each step increases by only one node
+        :param s_name: string.
+        :param f_time: float.
+        '''
+        node = Node(s_name)
+        if node not in self.set_of_nodes:
+            node.f_time = f_time
+            self.set_of_nodes.add(node)
+            self.d_nodes[node] = node
+            self.d_step[node.i_step].append(node)
+            self.d_level[node.i_level].append(node)
+
+    def _go_foward(self, i_steps):
+        '''
+        Create all the brachs of the binomial tree using the first node as root
+        :param i_step: integer. Number of steps in the tree
+        '''
+        # insere primeiro node
         node_root = Node('_')
         self.d_level[0] = [node_root]
         self.d_step[0] = [node_root]
         self.set_of_nodes.add(node_root)
-        # constroi arvore
-        self.set_branchs(i_steps)
-
-    def set_branchs(self, i_steps):
-        '''
-        Create all the brachs of the binomial tree using the
-        first node as root
-        :param i_step: integer. Number of steps in the tree
-        '''
+        self.d_nodes[node_root] = node_root
         # constroi arvore
         for i_step in xrange(1, i_steps):
             for node in self.d_step[i_step-1]:
                 s_down, s_up = node.get_childrens()
-                self.add_node(i_step, s_down)
-                self.add_node(i_step, s_up)
+                self.add_node(s_down, i_step)
+                self.add_node(s_up, i_step)
 
-    def add_node(self, i_step, s_name):
+    def __getitem__(self, s_idx):
         '''
-        Include a new node in the tree. To reduce the number
-        of nodes, a restriction called recombination condition
-        is imposed on the algorithm. This make the binomial
-        method more computationally tractable since the number
-        of nodes at each step increases by only one node
-        :param i_step: integer.
-        :param s_name: string.
+        Allow direct access to the nodes of the object
         '''
-        node = Node(s_name)
-        if node not in self.set_of_nodes:
-            self.set_of_nodes.add(node)
-            self.d_step[node.i_step].append(node)
-            self.d_level[node.i_level].append(node)
+        if isinstance(s_idx, str):
+            s_idx = Node(s_idx)
+        return self.d_nodes[s_idx]
 
     def __str__(self):
         '''
-        Return ascii representation of the binomial tree,
-        imposing a limite of 8 nodes to be printed out
+        Return ascii representation of the binomial tree, imposing a limite of
+        eight nodes to be printed out
         '''
         # limita passos plotados
         i_steps = min(8, self.i_steps)
@@ -196,83 +260,166 @@ class BinomialTree(object):
         return s_rtn
 
 
-class KWFTree(object):
+class KWFTree(BinomialTree):
     '''
-    A representation of the Binomial Tree used in Kalotay-
-    Williams-Fabozzi model
+    A representation of a Binomial Tree used by Kalotay-Williams-Fabozzi model
     '''
-    def __init__(self, i_steps, l_short_rates, l_maturity):
+    def __init__(self, l_short_rates, l_maturities):
         '''
-        Initiate a BinomialTree object. Save all parameter as
-        attributes
-        :param i_step: integer. Number of steps in the tree
+        Initiate a KWFTree object. Save all parameter as attributes
+        :param l_short_rates: list. The short rates to be fitted
+        :param l_maturities: list. The maturities of the rates
         '''
-        # python sets se comportam como hastable. O tempo
-        # de procura eh O(1), e nao O(n) como uma lista
-        self.set_of_nodes = set([])
-        self.set_of_nodes_new = set([])
-        # inicia outras variaveis
+        # checa se listas tem mesmo tamanho
+        if len(l_short_rates) != len(l_maturities):
+            raise DIFFERENT_LENGTHS_ERROR
+        super(KWFTree, self).__init__(len(l_short_rates))
+        self.l_maturities = l_maturities
         self.l_short_rates = l_short_rates
-        self.l_maturity = l_maturity
-        self.i_steps = i_steps
-        self.d_step = defaultdict(Node)
+        self.already_fitted = False
+
         # insere nodes
         node_root = Node('_')
+        node_root.set_values(f_r=l_short_rates[0],
+                             f_time=l_maturities[0],
+                             f_cupon=0,
+                             f_value=None)
+        self.d_level[0] = [node_root]
         self.d_step[0] = [node_root]
         self.set_of_nodes.add(node_root)
+        self.d_nodes[node_root] = node_root
         # constroi arvore
-        self.set_foward(i_steps)
+        self._go_foward(self.i_steps)
 
-    def set_foward(self, i_steps):
+    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde):
+        '''
+        Fit the foward curve using the short term rates
+        :param f_sigma: float. Dispersion of the short rate
+        :*param f_faceval. float. Face value of the hypothetical bond
+        :*param func_rate: function obj. The dynamics of the short rate
+        '''
+        self.f_face_value = f_faceval
+        self.f_sigma = f_sigma
+        self.func_rate = func_rate
+        for i_step in xrange(1, self.i_steps):
+            self._go_backward(i_step)
+        self.already_fitted = True
+
+    def get_lattice(self):
+        '''
+        Return the interest rate lattice produced by the tree simulation
+        '''
+        if not self.already_fitted:
+            raise NOT_FITTED_ERROR
+        d_rtn = {}
+        # cria ultimos nos sem recombinacao
+        l_nodes = []
+        for node in self.d_step[self.i_steps-2]:
+            # refaz todos os nodes do ultimo passo
+            s_d, s_u = node.get_childrens()
+            node_down = self[s_d].copy()
+            node_down.name = s_d
+            node_up = self[s_u].copy()
+            node_up.name = s_u
+            l_nodes.append(node_down)
+            l_nodes.append(node_up)
+        # itera para recriar trelica
+        for idx, node in enumerate(l_nodes):
+            s_name = node.name
+            s_key = idx
+            d_rtn[s_key] = []
+            for idx in xrange(len(s_name)+1):
+                d_rtn[s_key].append(float(self[s_name[:idx]].f_r))
+        # monta dataframe
+        df = pd.DataFrame(d_rtn).T
+        df = df + 1
+        df = df.cumprod(axis=1)
+        df = df.apply(lambda x: x**(1./(x.name+1))) - 1
+        df = df.T
+        return df
+
+    def _get_short_rate(self, f_init_rate, node):
+        '''
+        Get the value of the short rate based on the short rate dynamic setted
+        :param f_init_rate: float. the short rate setted to the lower node
+        :param node: Node object. Current Node
+        '''
+        i_above_min = node.i_level - (node.i_step * -1)
+        f_rtn = self.func_rate(f_init_rate,
+                               self.f_sigma,
+                               i_above_min,
+                               node.f_time)
+        return f_rtn
+
+    def _get_time_step(self, i_step):
+        '''
+        Get the length of the time step
+        :param i_step: integer. current step
+        '''
+        f_time = self.l_maturities[i_step]
+        if i_step == 0:
+            f_time_0 = 0.
+        else:
+            f_time_0 = self.l_maturities[i_step-1]
+        return f_time-f_time_0
+
+    def _go_foward(self, i_steps):
         '''
         Create all the brachs of the binomial tree using the
         first node as root
         :param i_step: integer. Number of steps in the tree
         '''
         # constroi arvore
-        for i_step in xrange(1, i_steps):
-            self.set_of_nodes_new = set([])
-            for node in self.set_of_nodes:
+        l_time = [0.] + self.l_maturities
+        for i_step in xrange(1, i_steps+1):
+            # cria nos do step
+            for node in self.d_step[i_step-1]:
+                f_time = l_time[i_step] - l_time[i_step-1]
                 s_down, s_up = node.get_childrens()
-                self.add_node(s_down)
-                self.add_node(s_up)
-            self.set_of_nodes = self.set_of_nodes_new.copy()
+                self.add_node(s_down, f_time)
+                self.add_node(s_up, f_time)
 
-    def set_backward(self):
+    def _go_backward(self, i_step):
         '''
-        Create all the brachs of the binomial tree the last
-        nodes to recreate the tree
+        Create all the brachs of the binomial tree using the
+        first node as root
+        :param i_step: integer. Number of steps in the tree
         '''
-        # constroi arvore
-        for i_step in xrange(len(self.set_of_nodes)-1, 0, -1):
-            self.set_of_nodes_new = set([])
-            for node in self.set_of_nodes:
-                s_src = node.get_source()
-                self.add_node(s_src)
-            self.set_of_nodes = self.set_of_nodes_new.copy()
+        # preenche valores no passo posterior
+        f_initial_rate = self.l_short_rates[i_step]
+        f_face_value = self.f_face_value
+        f_cupon = f_face_value * self.l_short_rates[i_step]
+        for node in self.d_step[i_step+1]:
+            node.set_values(f_cupon=f_cupon,
+                            f_value=f_face_value)
+        # itera taxas para fazer root ficar com valor de zero
+        res = optimize.minimize(self._set_all_values,
+                                f_initial_rate,
+                                args=(f_cupon, i_step))
 
-    def add_node(self, s_name):
+    def _set_all_values(self, f_rate, f_cupon, i_step):
         '''
-        Include a new node in the tree. To reduce the number
-        of nodes, a restriction called recombination condition
-        is imposed on the algorithm. This make the binomial
-        method more computationally tractable since the number
-        of nodes at each step increases by only one node
-        :param s_name: string.
+        Return the squared diference between the estimated value of a
+        hypothetical bond and the desired value. As this process is a
+        martingale, the current value should be equal to the face value of the
+        bond
+        :param f_rate: float. rate to discount the hypothetical bond
+        :param f_cupon: float. Cupon of the hypothetical bond
+        :param i_step: integer. Step to start iteration.
         '''
-        node = Node(s_name)
-        if node not in self.set_of_nodes:
-            self.set_of_nodes_new.add(node)
-            if node.name.count('D') == node.i_step:
-                self.d_step[node.i_step] = node
-
-    def __str__(self):
-        '''
-        Create a BinomialTree to return ascii representation tree,
-        imposing a limite of 8 nodes to be printed out
-        '''
-        # limita passos plotados
-        i_steps = min(8, self.i_steps)
-        # TODO: isso tah muito porco
-        tree_aux = BinomialTree(i_steps)
-        return str(tree_aux)
+        # preenche taxas do passo atual
+        for node in self.d_step[i_step]:
+            node.f_r = self._get_short_rate(f_rate, node)
+        # itera toda a arvore. Eh esperado que nos anteriores jah
+        # tenham a taxa setada
+        for i_aux_step in xrange(i_step, -1, -1):
+            for node in self.d_step[i_aux_step]:
+                s_down, s_up = node.get_childrens()
+                node_down = self[s_down]
+                node_up = self[s_up]
+                f_aux = (node_down.f_value + f_cupon) * node.f_prob
+                f_aux += (node_up.f_value + f_cupon) * node.f_prob
+                f_aux /= (1+node.f_r)**(node_down.f_time)
+                node.set_values(f_cupon=f_cupon,
+                                f_value=f_aux)
+        return (self['_'].f_value - self.f_face_value)**2
