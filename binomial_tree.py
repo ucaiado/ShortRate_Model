@@ -41,7 +41,8 @@ def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time):
     :param i_above_min: integer.
     '''
     theta_dt = 0.
-    sigma_w = f_sigma * (f_time**0.5) * (i_above_min * 1.)
+    # sigma_w = f_sigma * (f_time**0.5) * (i_above_min * 1.)
+    sigma_w = f_sigma * (i_above_min * 1.)
     return f_init_rate * math.exp(sigma_w)
 
 
@@ -87,7 +88,8 @@ class Node(object):
             self.f_r = f_r
         if f_time:
             self.f_time = f_time
-        self.f_cupon = f_cupon
+        if self.name != '_':
+            self.f_cupon = f_cupon
         self.f_value = f_value
 
     def get_childrens(self):
@@ -336,7 +338,29 @@ class KWFTree(BinomialTree):
         df = df.cumprod(axis=1)
         df = df.apply(lambda x: x**(1./(x.name+1))) - 1
         df = df.T
+        df.index = self.l_maturities
         return df
+
+    def get_description(self):
+        '''
+        Print a description of each node in the last state
+        '''
+        s_aux = '     {:3}{:10}{:10}{:10}{:10}'
+        print s_aux.format('', 'cupon', 'valor', 'taxa', 'prazo')
+        for i_step in self.d_step.keys():
+            for node in self.d_step[i_step]:
+                f_val = float(node.f_value)
+                if not f_val:
+                    f_val = 0
+                f_val1 = float(node.f_r)
+                if not f_val1:
+                    f_val1 = 0
+                s_aux = '{:3}{:10.2f}{:10.3f}{:10.3f}{:10.4f}'
+                print s_aux.format(node.name,
+                                   node.f_cupon,
+                                   f_val,
+                                   f_val1 * 100,
+                                   node.f_time)
 
     def _get_short_rate(self, f_init_rate, node):
         '''
@@ -388,16 +412,17 @@ class KWFTree(BinomialTree):
         # preenche valores no passo posterior
         f_initial_rate = self.l_short_rates[i_step]
         f_face_value = self.f_face_value
-        f_cupon = f_face_value * self.l_short_rates[i_step]
+
         for node in self.d_step[i_step+1]:
+            f_cupon = f_face_value * ((1+f_initial_rate)**node.f_time-1)
             node.set_values(f_cupon=f_cupon,
                             f_value=f_face_value)
         # itera taxas para fazer root ficar com valor de zero
         res = optimize.minimize(self._set_all_values,
                                 f_initial_rate,
-                                args=(f_cupon, i_step))
+                                args=(f_initial_rate, i_step))
 
-    def _set_all_values(self, f_rate, f_cupon, i_step):
+    def _set_all_values(self, f_rate, f_initial_rate, i_step, b_print=False):
         '''
         Return the squared diference between the estimated value of a
         hypothetical bond and the desired value. As this process is a
@@ -408,17 +433,24 @@ class KWFTree(BinomialTree):
         :param i_step: integer. Step to start iteration.
         '''
         # preenche taxas do passo atual
+        if b_print:
+            print f_rate
+        f_face_value = self.f_face_value
         for node in self.d_step[i_step]:
             node.f_r = self._get_short_rate(f_rate, node)
         # itera toda a arvore. Eh esperado que nos anteriores jah
         # tenham a taxa setada
         for i_aux_step in xrange(i_step, -1, -1):
             for node in self.d_step[i_aux_step]:
+                # calcula cupon usando taxa atual
+                f_cupon = f_face_value * ((1+f_initial_rate)**node.f_time-1)
+                # calcula valor presente pegabdo valores dos childrens
                 s_down, s_up = node.get_childrens()
                 node_down = self[s_down]
                 node_up = self[s_up]
-                f_aux = (node_down.f_value + f_cupon) * node.f_prob
-                f_aux += (node_up.f_value + f_cupon) * node.f_prob
+                f_aux = (node_down.f_value + node_down.f_cupon)
+                f_aux *= node_down.f_prob
+                f_aux += (node_up.f_value + node_up.f_cupon) * node_up.f_prob
                 f_aux /= (1+node.f_r)**(node_down.f_time)
                 node.set_values(f_cupon=f_cupon,
                                 f_value=f_aux)
