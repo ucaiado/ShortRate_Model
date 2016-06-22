@@ -12,6 +12,7 @@ Created on 06/20/2016
 # import libraries
 from collections import defaultdict
 import math
+import matplotlib.pylab as plt
 import pandas as pd
 from scipy import optimize
 
@@ -43,7 +44,9 @@ def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time):
     theta_dt = 0.
     # sigma_w = f_sigma * (f_time**0.5) * (i_above_min * 1.)
     sigma_w = f_sigma * (i_above_min * 1.)
-    return f_init_rate * math.exp(sigma_w)
+    # como a initial rate pode ser negativa, calculo o incemento
+    f_incr = abs(f_init_rate * (math.exp(sigma_w)-1))
+    return f_init_rate + f_incr
 
 
 '''
@@ -79,6 +82,9 @@ class Node(object):
         self.f_cupon = 0.
         self.f_value = 0.
         self.f_prob = 0.5
+        # inicia variaveis para precificacao de instrumentos
+        self.f_cupon_precify = 0.
+        self.f_value_precify = 0.
 
     def set_values(self, f_cupon, f_value, f_r=None, f_time=None):
         '''
@@ -126,7 +132,6 @@ class Node(object):
         node.f_value = self.f_value
         node.f_r = self.f_r
         node.f_time = self.f_time
-        node.f_cupon = self.f_cupon
         node.f_prob = self.f_prob
         return node
 
@@ -252,7 +257,7 @@ class BinomialTree(object):
             d_aux[i_key] = s_aux[:-1] + '\n'
         # organiza chaves
         l = d_aux.keys()
-        l.sort()
+        l.sort(reverse=True)
         # junta strings criadas em uma unica, de maneir aordenada
         s_rtn = ''
         for i_key in l:
@@ -279,7 +284,6 @@ class KWFTree(BinomialTree):
         self.l_maturities = l_maturities
         self.l_short_rates = l_short_rates
         self.already_fitted = False
-
         # insere nodes
         node_root = Node('_')
         node_root.set_values(f_r=l_short_rates[0],
@@ -293,18 +297,26 @@ class KWFTree(BinomialTree):
         # constroi arvore
         self._go_foward(self.i_steps)
 
-    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde):
+    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde,
+                         b_use_pu=False):
         '''
         Fit the foward curve using the short term rates
         :param f_sigma: float. Dispersion of the short rate
         :*param f_faceval. float. Face value of the hypothetical bond
         :*param func_rate: function obj. The dynamics of the short rate
+        :*param b_use_pu: boolean. If should use the pu in optimization step
         '''
         self.f_face_value = f_faceval
+        self.l_pu = []
+        for f_rate, f_mat in zip(self.l_short_rates, self.l_maturities):
+            self.l_pu.append(f_faceval/(1+f_rate)**f_mat)
         self.f_sigma = f_sigma
         self.func_rate = func_rate
         for i_step in xrange(1, self.i_steps):
-            self._go_backward(i_step)
+            f_pu = None
+            if b_use_pu:
+                f_pu = self.l_pu[i_step]
+            self._go_backward(i_step, f_pu)
         self.already_fitted = True
 
     def get_lattice(self):
@@ -341,12 +353,14 @@ class KWFTree(BinomialTree):
         df.index = self.l_maturities
         return df
 
-    def get_description(self):
+    def get_description(self, i_limit=10):
         '''
         Print a description of each node in the last state
+        :param i_limit: integer. Limit to print the results
         '''
-        s_aux = '     {:3}{:10}{:10}{:10}{:10}'
+        s_aux = '     {:12}{:10}{:10}{:10}{:10}'
         print s_aux.format('', 'cupon', 'valor', 'taxa', 'prazo')
+        i_rows = 0
         for i_step in self.d_step.keys():
             for node in self.d_step[i_step]:
                 f_val = float(node.f_value)
@@ -355,12 +369,64 @@ class KWFTree(BinomialTree):
                 f_val1 = float(node.f_r)
                 if not f_val1:
                     f_val1 = 0
-                s_aux = '{:3}{:10.2f}{:10.3f}{:10.3f}{:10.4f}'
+                s_aux = '{:12}{:10.2f}{:10.3f}{:10.3f}{:10.4f}'
+                i_rows += 1
                 print s_aux.format(node.name,
                                    node.f_cupon,
                                    f_val,
                                    f_val1 * 100,
                                    node.f_time)
+                if i_rows > i_limit:
+                    print '...'
+                    return
+
+    def plot_curves(self):
+        '''
+        Plot the curve approximated and the original curve
+        '''
+        df = self.get_lattice()
+        f, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
+        ax1.set_xlabel('Prazos em anos')
+        ax2.set_xlabel('Prazos em anos')
+        ax1.set_ylabel('Taxas')
+        ax1.set_title('curva media gerada\npela arvore')
+        ax2.set_title('curva de marcado\n')
+        df.T.mean().plot(ax=ax1)
+        df_aux = pd.DataFrame(self.l_short_rates, self.l_maturities)
+        df_aux.plot(legend=False, ax=ax2)
+        f.tight_layout()
+        return f
+
+    def plot_lattice(self):
+        '''
+        Plot the lattice generated by the tree
+        '''
+        df1 = self.get_lattice()
+        ax1 = df1.plot(legend=False)
+        ax1.set_xlabel('Prazos em anos')
+        ax1.set_ylabel('Taxas')
+        ax1.set_title(u'Curvas Geradas pela Árvore\n')
+        return ax1
+
+    def plot_hist(self):
+        '''
+        Return a histogram of the last step of the tree
+        '''
+        df = self.get_lattice()
+        ax1 = df.tail(1).T.hist(bins=17)
+        ax1[0][0].set_title(u'Distribuição de Valores do Último Passo\n',
+                            fontsize=16)
+        return ax1
+
+    def _get_cupon(self, f_face_value, f_initial_rate, f_time):
+        '''
+        Get the cupon value to the parameters passed
+        :param f_face_value: float.
+        :param f_initial_rate: float.
+        :param f_time: float
+        '''
+        f_cupon = f_face_value * ((1+f_initial_rate)**f_time-1)
+        return f_cupon
 
     def _get_short_rate(self, f_init_rate, node):
         '''
@@ -403,26 +469,30 @@ class KWFTree(BinomialTree):
                 self.add_node(s_down, f_time)
                 self.add_node(s_up, f_time)
 
-    def _go_backward(self, i_step):
+    def _go_backward(self, i_step, f_pu=None):
         '''
         Create all the brachs of the binomial tree using the
         first node as root
         :param i_step: integer. Number of steps in the tree
+        :param f_pu: float. the face value to be used in optimization
         '''
         # preenche valores no passo posterior
         f_initial_rate = self.l_short_rates[i_step]
         f_face_value = self.f_face_value
 
         for node in self.d_step[i_step+1]:
-            f_cupon = f_face_value * ((1+f_initial_rate)**node.f_time-1)
+            f_cupon = self._get_cupon(f_face_value,
+                                      f_initial_rate,
+                                      node.f_time)
             node.set_values(f_cupon=f_cupon,
                             f_value=f_face_value)
         # itera taxas para fazer root ficar com valor de zero
-        res = optimize.minimize(self._set_all_values,
-                                f_initial_rate,
-                                args=(f_initial_rate, i_step))
+        res = optimize.leastsq(self._set_all_values,
+                               x0=-0.05,
+                               xtol=1e-7,
+                               args=(f_initial_rate, i_step, f_pu))
 
-    def _set_all_values(self, f_rate, f_initial_rate, i_step, b_print=False):
+    def _set_all_values(self, f_delta, f_initial_rate, i_step, f_pu=None):
         '''
         Return the squared diference between the estimated value of a
         hypothetical bond and the desired value. As this process is a
@@ -431,10 +501,13 @@ class KWFTree(BinomialTree):
         :param f_rate: float. rate to discount the hypothetical bond
         :param f_cupon: float. Cupon of the hypothetical bond
         :param i_step: integer. Step to start iteration.
+        :*param f_pu: float. Value to be used in optimization
         '''
         # preenche taxas do passo atual
-        if b_print:
-            print f_rate
+        f_optim = self.f_face_value
+        if f_pu:
+            f_optim = f_pu
+        f_rate = f_initial_rate + f_delta
         f_face_value = self.f_face_value
         for node in self.d_step[i_step]:
             node.f_r = self._get_short_rate(f_rate, node)
@@ -443,7 +516,9 @@ class KWFTree(BinomialTree):
         for i_aux_step in xrange(i_step, -1, -1):
             for node in self.d_step[i_aux_step]:
                 # calcula cupon usando taxa atual
-                f_cupon = f_face_value * ((1+f_initial_rate)**node.f_time-1)
+                f_cupon = self._get_cupon(f_face_value,
+                                          f_initial_rate,
+                                          node.f_time)
                 # calcula valor presente pegabdo valores dos childrens
                 s_down, s_up = node.get_childrens()
                 node_down = self[s_down]
@@ -454,4 +529,49 @@ class KWFTree(BinomialTree):
                 f_aux /= (1+node.f_r)**(node_down.f_time)
                 node.set_values(f_cupon=f_cupon,
                                 f_value=f_aux)
-        return (self['_'].f_value - self.f_face_value)**2
+        return (self['_'].f_value - f_optim)**2
+
+
+class KWFTreePU(KWFTree):
+    '''
+    A representation of a Binomial Tree used by Kalotay-Williams-Fabozzi model
+    using th ePU of the contracts to fit the curve
+    '''
+    def __init__(self, l_short_rates, l_maturities):
+        '''
+        Initiate a KWFTreePU object. Save all parameter as attributes
+        :param l_short_rates: list. The short rates to be fitted
+        :param l_maturities: list. The maturities of the rates
+        '''
+        super(KWFTreePU, self).__init__(l_short_rates, l_maturities)
+
+    def _get_cupon(self, f_face_value, f_initial_rate, f_time):
+        '''
+        Get the cupon value to the parameters passed
+        :param f_face_value: float.
+        :param f_initial_rate: float.
+        :param f_time: float
+        '''
+        f_cupon = 0.
+        return f_cupon
+
+    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde):
+        '''
+        Fit the foward curve using the short term rates
+        :param f_sigma: float. Dispersion of the short rate
+        :*param f_faceval. float. Face value of the hypothetical bond
+        :*param func_rate: function obj. The dynamics of the short rate
+        '''
+        b_use_pu = True
+        self.f_face_value = f_faceval
+        self.l_pu = []
+        for f_rate, f_mat in zip(self.l_short_rates, self.l_maturities):
+            self.l_pu.append(f_faceval/(1+f_rate)**f_mat)
+        self.f_sigma = f_sigma
+        self.func_rate = func_rate
+        for i_step in xrange(1, self.i_steps):
+            f_pu = None
+            if b_use_pu:
+                f_pu = self.l_pu[i_step]
+            self._go_backward(i_step, f_pu)
+        self.already_fitted = True
