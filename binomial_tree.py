@@ -98,6 +98,17 @@ class Node(object):
             self.f_cupon = f_cupon
         self.f_value = f_value
 
+    def set_values_to_precify(self, f_value, f_cupon=None):
+        '''
+        Set values of the node to be used in precification of instruments
+        :param f_value: float. Current instrument value in the node
+        :*param f_cupon: float. copon value in the node
+        '''
+        if f_cupon:
+            if self.name != '_':
+                self.f_cupon_precify = f_cupon
+        self.f_value_precify = f_value
+
     def get_childrens(self):
         '''
         Return the possible childrens of the node
@@ -223,7 +234,7 @@ class BinomialTree(object):
         self.set_of_nodes.add(node_root)
         self.d_nodes[node_root] = node_root
         # constroi arvore
-        for i_step in xrange(1, i_steps):
+        for i_step in xrange(1, i_steps+1):
             for node in self.d_step[i_step-1]:
                 s_down, s_up = node.get_childrens()
                 self.add_node(s_down, i_step)
