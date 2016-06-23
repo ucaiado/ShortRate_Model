@@ -59,11 +59,33 @@ class Instrument(object):
         '''
         raise NotImplemented
 
+    def get_range_of_values(self, tree_fitted, i_steps):
+        '''
+        Return a range of the possible values to the instrument
+        :param tree_fitted: BinomialTree object. A tree already fitted
+        :param i_steps: integer. the step of the matutiry of the bond
+        '''
+        # checa se a arvore ja tem as fowars jah setadas
+        if not tree_fitted.already_fitted:
+            raise NOT_FITTED_ERROR
+        if i_steps <= 0 or i_steps > tree_fitted.i_steps:
+            raise INCORRECT_SETUP_ERROR
+        # preenche valores no ultimo passo com valor de face
+        df_value = self._get_terminal_value()
+        df_forwards = tree_fitted.get_fowards_dynamics()
+        df_forwards += 1
+        df_forwards = df_forwards.ix[:, :i_steps-1]
+        for idx, row in df_forwards.T.ix[::-1, :].iterrows():
+            f_this_cupon, f_val = self._get_value_on_the_node(0.)
+            f_time = tree_fitted.d_step[idx+1][0].f_time
+            df_value = (df_value + f_this_cupon)/(row**(f_time))
+
+        return df_value
+
     def get_current_value(self, tree_fitted, i_steps):
         '''
         Calculate the price to the instrument going backward in the tree passed
-        :param tree_fitted: BinomialTree object. A tree with the foward rates
-            already fitted
+        :param tree_fitted: BinomialTree object. A tree already fitted
         :param i_steps: integer. the step of the matutiry of the bond
         '''
         # checa se a arvore ja tem as fowars jah setadas
