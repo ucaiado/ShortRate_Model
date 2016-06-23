@@ -42,7 +42,24 @@ class TO_BIG_TO_CREATE_ERROR(Exception):
     pass
 
 
-def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time):
+def kwf_sde_adj(f_init_rate, f_sigma, i_above_min, f_time, i_step):
+    '''
+    Return the value of the short rate given by the dynamic given in the paper
+    :param f_sigma: float. Foward one-year rate volatility af all times
+    :param f_time: float. time until this node
+    :param i_above_min: integer. number of nodes  above the lower node
+    :param i_step: integer. The step number
+    '''
+    theta_dt = 0.
+    # sigma_w = f_sigma * (f_time**0.5) * (i_above_min * 1.)
+    f_sigma1 = f_sigma * f_time / (i_step * 1.)
+    sigma_w = f_sigma1 * (i_above_min * 1.)  # equivalente a 2 * sigma
+    # como a initial rate pode ser negativa, calculo o incemento
+    f_incr = abs(f_init_rate * (math.exp(sigma_w)-1))
+    return f_init_rate + f_incr, f_sigma1
+
+
+def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time, i_step):
     '''
     Return the value of the short rate given by the dynamic given in the paper
     :param f_sigma: float. Foward one-year rate volatility af all times
@@ -54,7 +71,7 @@ def kwf_sde(f_init_rate, f_sigma, i_above_min, f_time):
     sigma_w = f_sigma * (i_above_min * 1.)
     # como a initial rate pode ser negativa, calculo o incemento
     f_incr = abs(f_init_rate * (math.exp(sigma_w)-1))
-    return f_init_rate + f_incr
+    return f_init_rate + f_incr, f_sigma
 
 
 '''
@@ -93,6 +110,8 @@ class Node(object):
         # inicia variaveis para precificacao de instrumentos
         self.f_cupon_precify = 0.
         self.f_value_precify = 0.
+        # inciia variavel para guardar sigma
+        self.f_sigma = 0.
 
     def set_values(self, f_cupon, f_value, f_r=None, f_time=None):
         '''
@@ -391,8 +410,9 @@ class KWFTree(BinomialTree):
         Print a description of each node in the last state
         :param i_limit: integer. Limit to print the results
         '''
-        s_aux = '     {:12}{:10}{:10}{:10}{:10}'
-        print s_aux.format('', 'cupon', 'valor', 'taxa', 'prazo')
+        s_aux = '     {:12}{:10}{:10}{:10}{:10}{:10}{:10}'
+        print s_aux.format('', 'cupon', 'valor', 'taxa', 'prazo',
+                           'venc', 'sigma')
         i_rows = 0
         for i_step in self.d_step.keys():
             for node in self.d_step[i_step]:
@@ -402,13 +422,18 @@ class KWFTree(BinomialTree):
                 f_val1 = float(node.f_r)
                 if not f_val1:
                     f_val1 = 0
-                s_aux = '{:12}{:10.2f}{:10.3f}{:10.3f}{:10.4f}'
+                s_aux = '{:12}{:10.2f}{:10.3f}{:10.3f}{:10.4f}{:10.4f}{:10.4f}'
                 i_rows += 1
+                f_venc = self.l_maturities[node.i_step-1]
+                if node.name == '_':
+                    f_venc = 0.
                 print s_aux.format(node.name,
                                    node.f_cupon,
                                    f_val,
                                    f_val1 * 100,
-                                   node.f_time)
+                                   node.f_time,
+                                   f_venc,
+                                   node.f_sigma * 100)
                 if i_rows > i_limit:
                     print '...'
                     return
@@ -468,10 +493,12 @@ class KWFTree(BinomialTree):
         :param node: Node object. Current Node
         '''
         i_above_min = node.i_level - (node.i_step * -1)
-        f_rtn = self.func_rate(f_init_rate,
-                               self.f_sigma,
-                               i_above_min,
-                               node.f_time)
+        f_rtn, f_sig = self.func_rate(f_init_rate,
+                                      self.f_sigma,
+                                      i_above_min,
+                                      self.l_maturities[node.i_step-1],
+                                      node.i_step)
+        node.f_sigma = f_sig
         return f_rtn
 
     def _get_time_step(self, i_step):
@@ -588,7 +615,7 @@ class KWFTreePU(KWFTree):
         f_cupon = 0.
         return f_cupon
 
-    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde):
+    def fit_foward_curve(self, f_sigma, f_faceval=100., func_rate=kwf_sde_adj):
         '''
         Fit the foward curve using the short term rates
         :param f_sigma: float. Foward one-year rate volatility af all times
