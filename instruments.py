@@ -59,6 +59,21 @@ class Instrument(object):
         '''
         raise NotImplemented
 
+    def _get_discount_factor(self, node, node_ahead):
+        '''
+        Return the appropriate discount factor of the current step
+        :param node: Node object. The current node
+        :param node_ahead: Node object. the node in the next step
+        '''
+        raise NotImplemented
+
+    def _get_appropriate_maturity(self, f_val, f_time):
+        '''
+        Return the corrected time of the node
+        :TODO: implement code
+        '''
+        return f_time
+
     def get_range_of_values(self, tree_fitted, i_steps):
         '''
         Return a range of the possible values to the instrument
@@ -111,7 +126,8 @@ class Instrument(object):
                 f_aux2 = (node_up.f_value_precify + node_up.f_cupon_precify)
                 f_aux2 *= node_up.f_prob
                 f_aux += f_aux2
-                f_aux /= (1+node.f_r)**(node_down.f_time)
+                f_aux /= self._get_discount_factor(node, node_down)
+                # f_aux /= (1+node.f_r)**(node_down.f_time)
                 f_this_cupon, f_val = self._get_value_on_the_node(f_aux)
                 node.set_values_to_precify(f_cupon=f_this_cupon,
                                            f_value=f_val)
@@ -142,3 +158,11 @@ class Bond(Instrument):
         Return the cupon and value of the node
         '''
         return self.f_cupon, f_value
+
+    def _get_discount_factor(self, node, node_ahead):
+        '''
+        Return the appropriate discount factor of the current step
+        :param node: Node object. The current node
+        :param node_ahead: Node object. the node in the next step
+        '''
+        return (1+node.f_r)**(node_ahead.f_time)
