@@ -67,14 +67,14 @@ class Instrument(object):
         '''
         raise NotImplemented
 
-    def _get_appropriate_maturity(self, f_val, f_time):
+    def _get_appropriate_maturity(self, node):
         '''
-        Return the corrected time of the node
-        :TODO: implement code
+        Return the the time of the node based on the previous values
+        :param node: Node object. The current node
         '''
-        return f_time
+        raise NotImplemented
 
-    def get_range_of_values(self, tree_fitted, i_steps):
+    def _get_range_of_values(self, tree_fitted, i_steps):
         '''
         Return a range of the possible values to the instrument
         :param tree_fitted: BinomialTree object. A tree already fitted
@@ -92,12 +92,13 @@ class Instrument(object):
         df_forwards = df_forwards.ix[:, :i_steps-1]
         for idx, row in df_forwards.T.ix[::-1, :].iterrows():
             f_this_cupon, f_val = self._get_value_on_the_node(0.)
-            f_time = tree_fitted.d_step[idx+1][0].f_time
+            node = tree_fitted.d_step[idx+1][0]
+            f_time = self._get_appropriate_maturity(node)
             df_value = (df_value + f_this_cupon)/(row**(f_time))
 
         return df_value
 
-    def get_current_value(self, tree_fitted, i_steps):
+    def _get_current_value(self, tree_fitted, i_steps):
         '''
         Calculate the price to the instrument going backward in the tree passed
         :param tree_fitted: BinomialTree object. A tree already fitted
@@ -133,6 +134,24 @@ class Instrument(object):
                                            f_value=f_val)
         return float(tree_fitted['_'].f_value_precify)
 
+    def get_range_of_values(self, tree_fitted, i_steps):
+        '''
+        Return a range of the possible values to the instrument. It calls the
+        _get_range_of_values() method.
+        :param tree_fitted: BinomialTree object. A tree already fitted
+        :param i_steps: integer. the step of the matutiry of the bond
+        '''
+        return self._get_range_of_values(tree_fitted, i_steps)
+
+    def get_current_value(self, tree_fitted, i_steps):
+        '''
+        Calculate the price to the instrument going backward in the tree passed
+        It call _get_current_value() method
+        :param tree_fitted: BinomialTree object. A tree already fitted
+        :param i_steps: integer. the step of the matutiry of the bond
+        '''
+        return self._get_current_value(tree_fitted, i_steps)
+
 
 class Bond(Instrument):
     '''
@@ -166,3 +185,93 @@ class Bond(Instrument):
         :param node_ahead: Node object. the node in the next step
         '''
         return (1+node.f_r)**(node_ahead.f_time)
+
+    def _get_appropriate_maturity(self, node):
+        '''
+        Return the the time of the node based on the previous values
+        :param node: Node object. The current node
+        '''
+        return node.f_time
+
+
+class BondBetween(Instrument):
+    '''
+    A Bond representation that presents a maturity between two nodes of the
+    tree used to precify it. The maturiry should less or equal of the last tree
+    step
+    '''
+    def __init__(self, f_face_value, f_maturity, f_cupon=0):
+        '''
+        Initiate a BondBetween object. Save all parameters as attributes
+        :param f_face_value: float. The face value of the Instrument
+        :param f_maturity: float. the maturiry of the bond expressed in years
+        :*param f_cupon: float. The cupon paid at each month by the instrument
+        '''
+        # inicia objeto
+        self.f_maturity = f_maturity
+        super(BondBetween, self).__init__(f_face_value, f_cupon)
+        # encontra step da arvore imediatamente inferior ao vencimento do bond
+        self.node_step = None
+        self.node_maturity = None
+
+    def _get_terminal_value(self):
+        '''
+        Return the terminal value to the bond. This method should be changed
+        to different instrauments
+        '''
+        return self.f_face_value
+
+    def _get_value_on_the_node(self, f_value):
+        '''
+        Return the cupon and value of the node
+        '''
+        return self.f_cupon, f_value
+
+    def _get_discount_factor(self, node, node_ahead):
+        '''
+        Return the appropriate discount factor of the current step
+        :param node: Node object. The current node
+        :param node_ahead: Node object. the node in the next step
+        '''
+        if node_ahead.i_step >= self.node_step:
+            return (1+node.f_r)**(self.f_time)
+        return (1+node.f_r)**(node_ahead.f_time)
+
+    def _get_appropriate_maturity(self, node):
+        '''
+        Return the the time of the node based on the previous values
+        :param node: Node object. The current node
+        '''
+        if node.i_step >= self.node_step:
+            return self.f_time
+        return node.f_time
+
+    def get_range_of_values(self, tree_fitted):
+        '''
+        Return a range of the possible values to the instrument. It calls the
+        _get_range_of_values() method.
+        :param tree_fitted: BinomialTree object. A tree already fitted
+        :param i_steps: integer. the step of the matutiry of the bond
+        '''
+        l_mat = [0] + tree_fitted.l_maturities
+        for idx, f_aux in enumerate(l_mat):
+            if f_aux >= self.f_maturity:
+                break
+        self.node_step = idx
+        self.f_time = self.f_maturity - l_mat[idx-1]
+        return self._get_range_of_values(tree_fitted, self.node_step)
+
+    def get_current_value(self, tree_fitted):
+        '''
+        Calculate the price to the instrument going backward in the tree passed
+        It call _get_current_value() method
+        :param tree_fitted: BinomialTree object. A tree already fitted
+        :param i_steps: integer. the step of the matutiry of the bond
+        '''
+        l_mat = [0] + tree_fitted.l_maturities
+        for idx, f_aux in enumerate(l_mat):
+            if f_aux >= self.f_maturity:
+                break
+        self.node_step = idx
+        self.f_time = self.f_maturity - l_mat[idx-1]
+        return self._get_current_value(tree_fitted, self.node_step)
