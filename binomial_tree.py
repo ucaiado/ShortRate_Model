@@ -405,10 +405,12 @@ class KWFTree(BinomialTree):
         df.index = self.l_maturities
         return df
 
-    def get_description(self, i_limit=10):
+    def get_description(self, i_limit=10, b_precify=False, b_index=False):
         '''
         Print a description of each node in the last state
         :param i_limit: integer. Limit to print the results
+        :param b_precify: boolean. Return the values in the last precification
+        :param b_index: boolean. Return the index instead of the name
         '''
         s_aux = '     {:12}{:10}{:10}{:10}{:10}{:10}{:10}'
         print s_aux.format('', 'cupon', 'valor', 'taxa', 'prazo',
@@ -427,8 +429,15 @@ class KWFTree(BinomialTree):
                 f_venc = self.l_maturities[node.i_step-1]
                 if node.name == '_':
                     f_venc = 0.
-                print s_aux.format(node.name,
-                                   node.f_cupon,
+                f_cupon = node.f_cupon
+                if b_precify:
+                    f_cupon = node.f_cupon_precify
+                    f_val = float(node.f_value_precify)
+                s_name = node.name
+                if b_index:
+                    s_name = node.node_idx
+                print s_aux.format(s_name,
+                                   f_cupon,
                                    f_val,
                                    f_val1 * 100,
                                    node.f_time,

@@ -53,7 +53,7 @@ class Instrument(object):
         '''
         raise NotImplemented
 
-    def _get_value_on_the_node(self, f_value):
+    def _get_value_on_the_node(self, f_value, f_time):
         '''
         Return the value of the node
         '''
@@ -91,9 +91,10 @@ class Instrument(object):
         df_forwards += 1
         df_forwards = df_forwards.ix[:, :i_steps-1]
         for idx, row in df_forwards.T.ix[::-1, :].iterrows():
-            f_this_cupon, f_val = self._get_value_on_the_node(0.)
             node = tree_fitted.d_step[idx+1][0]
             f_time = self._get_appropriate_maturity(node)
+            f_maturity = tree_fitted.l_maturities[node.i_step-1]
+            f_this_cupon, f_val = self._get_value_on_the_node(0., f_maturity)
             df_value = (df_value + f_this_cupon)/(row**(f_time))
 
         return df_value
@@ -129,7 +130,9 @@ class Instrument(object):
                 f_aux += f_aux2
                 f_aux /= self._get_discount_factor(node, node_down)
                 # f_aux /= (1+node.f_r)**(node_down.f_time)
-                f_this_cupon, f_val = self._get_value_on_the_node(f_aux)
+                f_maturity = tree_fitted.l_maturities[node.i_step-1]
+                f_this_cupon, f_val = self._get_value_on_the_node(f_aux,
+                                                                  f_maturity)
                 node.set_values_to_precify(f_cupon=f_this_cupon,
                                            f_value=f_val)
         return float(tree_fitted['_'].f_value_precify)
@@ -172,7 +175,7 @@ class Bond(Instrument):
         '''
         return self.f_face_value
 
-    def _get_value_on_the_node(self, f_value):
+    def _get_value_on_the_node(self, f_value, f_time):
         '''
         Return the cupon and value of the node
         '''
@@ -221,7 +224,7 @@ class BondBetween(Instrument):
         '''
         return self.f_face_value
 
-    def _get_value_on_the_node(self, f_value):
+    def _get_value_on_the_node(self, f_value, f_time):
         '''
         Return the cupon and value of the node
         '''
@@ -275,3 +278,34 @@ class BondBetween(Instrument):
         self.node_step = idx
         self.f_time = self.f_maturity - l_mat[idx-1]
         return self._get_current_value(tree_fitted, self.node_step)
+
+
+class NTN_F(BondBetween):
+    '''
+    A NTN-F representation. This Bond pays semestral cupons of 10 percent per
+    year and has a face value of 1,000
+    '''
+    def __init__(self, f_maturity, l_du_cupons):
+        '''
+        Initiate a NTN_F object. Save all parameters as attributes
+        :param f_maturity: float. the maturiry of the bond expressed in years
+        :param l_du_cupons: list. business days for the payment of each cupon
+        '''
+        # inicia objeto
+        self.l_du_cupons = l_du_cupons
+        self.f_maturity = f_maturity
+        f_cupon = ((1.+0.1)**0.5-1.)*1000.
+        super(NTN_F, self).__init__(1000., f_maturity, f_cupon)
+        # encontra step da arvore imediatamente inferior ao vencimento do bond
+        self.node_step = None
+        self.node_maturity = None
+
+    def _get_value_on_the_node(self, f_value, f_maturity):
+        '''
+        Return the cupon and value of the node. Pay semestral cupons
+        '''
+        # if abs((f_time/0.5)-int((f_time/0.5)))<1e-4:
+        if f_maturity in self.l_du_cupons:
+            # print f_maturity*252.
+            return self.f_cupon, f_value
+        return 0., f_value
