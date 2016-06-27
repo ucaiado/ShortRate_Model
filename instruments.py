@@ -113,8 +113,12 @@ class Instrument(object):
         # preenche valores no ultimo passo com valor de face
         f_face_value = self._get_terminal_value()
         for node in tree_fitted.d_step[i_steps]:
-            node.set_values_to_precify(f_cupon=self.f_cupon,
-                                       f_value=self.f_face_value)
+            # checa quais valores de cupon e face value devem ser usados
+            f_maturity = tree_fitted.l_maturities[node.i_step-1]
+            f_cupon, f_val = self._get_value_on_the_node(self.f_face_value,
+                                                         f_maturity)
+            node.set_values_to_precify(f_cupon=f_cupon,
+                                       f_value=f_val)
 
         # itera toda a arvore de tras para frente
         for i_aux_step in xrange(i_steps-1, -1, -1):

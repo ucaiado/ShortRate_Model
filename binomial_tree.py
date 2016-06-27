@@ -131,7 +131,7 @@ class Node(object):
         :param f_value: float. Current instrument value in the node
         :*param f_cupon: float. copon value in the node
         '''
-        if f_cupon:
+        if not isinstance(f_cupon, type(None)):
             if self.name != '_':
                 self.f_cupon_precify = f_cupon
         self.f_value_precify = f_value
